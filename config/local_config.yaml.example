@@ -1,0 +1,16 @@
+LOCAL:
+    data_paths: "NAME_OF_SYSTEM" 
+
+DATA:
+    fcst_data_source: "ifs"
+    obs_data_source: "imerg"
+    normalise: True
+    min_latitude: -11.95
+    max_latitude: 15.05
+    latitude_step_size: 0.1
+    min_longitude: 25.05
+    max_longitude: 51.45
+    longitude_step_size: 0.1
+
+TRAIN:
+    normalisation_year: 2017

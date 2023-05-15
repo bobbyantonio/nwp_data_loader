@@ -20,9 +20,9 @@ from argparse import ArgumentParser
 logger = logging.getLogger(__file__)
 logger.setLevel(logging.INFO)
 
-from dsrnngan.utils import read_config
+from .config_utils import get_data_paths, read_config
 
-DATA_PATHS = read_config.get_data_paths()
+DATA_PATHS = get_data_paths()
 
 # Raw paths for data that has not been regridded or cut down to correct lat/lon range
 
@@ -92,7 +92,7 @@ all_era5_fields = list(VAR_LOOKUP_ERA5.keys())
 
 input_field_lookup = {'ifs': all_ifs_fields, 'era5': all_era5_fields}
 
-config = read_config.read_config()
+config = read_config()
 
 NORMALISATION_YEAR = config['TRAIN']['normalisation_year']
 

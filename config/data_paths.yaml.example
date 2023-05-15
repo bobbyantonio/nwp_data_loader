@@ -1,0 +1,13 @@
+NAME_OF_SYSTEM:
+    IMERG: '/path/to/IMERG/half_hourly/final/'
+    ERA5: '/path/to/ERA-5/'
+    OROGRAPHY: '/path/to/orography.nc'
+    LSM: '/path/to/lsm.nc'
+    CONSTANTS: '/path/to/constants_folder/'     
+
+NAME_OF_OTHER_SYSTEM:
+    IMERG: '/path/to/other/IMERG/half_hourly/final/'
+    ERA5: '/path/to/other/ERA-5/'
+    OROGRAPHY: '/path/to/other/orography.nc'
+    LSM: '/path/to/other/lsm.nc'
+    CONSTANTS: '/path/to/other/constants_folder/'  
