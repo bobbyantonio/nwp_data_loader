@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name='nwp-data-loader',
     version='0.1.0',    
-    description='A example Python package',
+    description='Utilities for loading data for numerical weather prediction',
     url='https://github.com/shuds13/pyexample',
     author='Bobby Antonio',
     author_email='bobbyantonio@gmail.com',
