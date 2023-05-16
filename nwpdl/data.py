@@ -8,7 +8,7 @@ import netCDF4
 from calendar import monthrange
 from tqdm import tqdm
 from glob import glob
-from typing import Iterable
+from typing import Iterable, Union
 
 from datetime import datetime, timedelta, date
 import numpy as np
@@ -30,8 +30,8 @@ IMERG_PATH = DATA_PATHS["GENERAL"].get("IMERG", '')
 NIMROD_PATH = DATA_PATHS["GENERAL"].get("NIMROD", '')
 ERA5_PATH = DATA_PATHS["GENERAL"].get("ERA5", '')
 IFS_PATH = DATA_PATHS["GENERAL"].get("IFS", '')
-OROGRAPHY_PATH = DATA_PATHS["GENERAL"].get("OROGRAPHY")
-LSM_PATH = DATA_PATHS["GENERAL"].get("LSM")
+OROGRAPHY_FILENAME = DATA_PATHS["GENERAL"].get("OROGRAPHY_FILENAME")
+LSM_FILENAME = DATA_PATHS["GENERAL"].get("LSM_FILENAME")
 CONSTANTS_PATH = DATA_PATHS["GENERAL"].get("CONSTANTS")
 
 FIELD_TO_HEADER_LOOKUP_IFS = {'tp': 'sfc',
@@ -213,7 +213,8 @@ def get_obs_dates(start_date: datetime,
 
 def get_dates(years, obs_data_source: str, 
               fcst_data_source: str,
-              data_paths=DATA_PATHS):
+              data_paths=DATA_PATHS,
+              hour: Union[str, int]='random' ):
     """
     Get dates for which there is observational and forecast data
 
@@ -222,7 +223,7 @@ def get_dates(years, obs_data_source: str,
         obs_data_source (str): name of observational data source
         fcst_data_source (str): name of forecast data source
         data_paths (dict, optional): Dict containing paths to data. Defaults to DATA_PATHS.
-
+        hour (Union[str, int], optional): hour to look for, defaults to 'random'
     Returns:
         list: list of valid date strings
     """
@@ -236,10 +237,10 @@ def get_dates(years, obs_data_source: str,
     
     obs_dates = set([item for item in date_range if file_exists(data_source=obs_data_source, year=item.year,
                                                     month=item.month, day=item.day,
-                                                    data_paths=data_paths)])
+                                                    data_paths=data_paths, hour=hour)])
     fcst_dates = set([item for item in date_range if file_exists(data_source=fcst_data_source, year=item.year,
                                                     month=item.month, day=item.day,
-                                                    data_paths=data_paths)])
+                                                    data_paths=data_paths, hour=hour)])
     dates = sorted(obs_dates.intersection(fcst_dates))
         
     return [item.strftime('%Y%m%d') for item in dates]
@@ -471,7 +472,7 @@ def load_observational_data(data_source: str, *args, **kwargs):
         raise NotImplementedError(f'Data source {data_source} not implemented yet')
 
 
-def load_orography(oro_path: str=OROGRAPHY_PATH, 
+def load_orography(oro_path: str=OROGRAPHY_FILENAME, 
                    latitude_vals: list=None, 
                    longitude_vals: list=None,
                    interpolate: bool=True):
@@ -512,7 +513,7 @@ def load_orography(oro_path: str=OROGRAPHY_PATH,
 
     return h_vals
 
-def load_land_sea_mask(lsm_path=LSM_PATH, 
+def load_land_sea_mask(lsm_path=LSM_FILENAME, 
                        latitude_vals=None, 
                        longitude_vals=None,
                        interpolate=True):
@@ -546,8 +547,10 @@ def load_land_sea_mask(lsm_path=LSM_PATH,
     
     return lsm
 
-def load_hires_constants(batch_size: int=1, lsm_path: str=LSM_PATH, 
-                         oro_path: str=OROGRAPHY_PATH,
+def load_hires_constants(batch_size: int=1, 
+                         constants_folder: str=CONSTANTS_PATH,
+                         lsm_filename: str=LSM_FILENAME, 
+                         oro_filename: str=OROGRAPHY_FILENAME,
                          latitude_vals: list=None, 
                          longitude_vals: list=None):
     """
@@ -565,13 +568,19 @@ def load_hires_constants(batch_size: int=1, lsm_path: str=LSM_PATH,
     Returns:
         np.ndarray: array of data
     """
+    if lsm_filename is None:
+        lsm_filename = LSM_FILENAME
+    
+    if oro_filename is None:
+        oro_filename = OROGRAPHY_FILENAME
+    
     # LSM 
-    lsm = load_land_sea_mask(lsm_path=lsm_path, latitude_vals=latitude_vals,
+    lsm = load_land_sea_mask(lsm_path=os.path.join(constants_folder, lsm_filename), latitude_vals=latitude_vals,
                              longitude_vals=longitude_vals)
     lsm= np.expand_dims(lsm, axis=0) # Need to expand so that dims are consistent with other data
 
     # Orography
-    z = load_orography(oro_path=oro_path, latitude_vals=latitude_vals, 
+    z = load_orography(oro_path=os.path.join(constants_folder, oro_filename), latitude_vals=latitude_vals, 
                        longitude_vals=longitude_vals)
     z = np.expand_dims(z, axis=0)
     
@@ -618,7 +627,8 @@ def load_fcst_radar_batch(batch_dates: Iterable,
     if (not constants):
         return np.array(batch_x), np.array(batch_y)
     else:
-        return [np.array(batch_x), load_hires_constants(len(batch_dates))], np.array(batch_y)
+        return [np.array(batch_x), load_hires_constants(len(batch_dates), 
+                                                        constants_folder=constants_dir)], np.array(batch_y)
 
 def get_ifs_filepath(field: str, loaddate: datetime, 
                      loadtime: int, fcst_dir: str=IFS_PATH):
@@ -990,7 +1000,7 @@ def get_era5_stats(variable: str, longitude_vals: list, latitude_vals: list,
     max_lon = int(max(longitude_vals))
         
     # Filepath is spcific to make sure we don't use the wrong normalisation stats
-    fp = f'{output_dir}/ERA_norm_{variable}_{year}_lat{min_lat}-{max_lat}lon{min_lon}-{max_lon}.pkl'
+    fp = f'{output_dir}/ERA5_norm_{variable}_{year}_lat{min_lat}-{max_lat}lon{min_lon}-{max_lon}.pkl'
 
     if use_cached and os.path.isfile(fp):
         logger.debug('Loading stats from cache')

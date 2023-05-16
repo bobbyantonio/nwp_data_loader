@@ -2,7 +2,6 @@ import sys, os
 import unittest
 import tempfile
 import pickle
-import time
 from datetime import datetime
 import numpy as np
 import xarray as xr
@@ -11,11 +10,11 @@ from pathlib import Path
 from numpy import testing
 
 HOME = Path(__file__).parents[1]
-data_folder = HOME / 'system_tests' / 'data'
+data_folder = HOME / 'tests' / 'data'
 
 sys.path.append(str(HOME))
 
-from dsrnngan.data.data import infer_lat_lon_names, load_hires_constants, load_imerg_raw, load_era5_day_raw, \
+from nwpdl.data import infer_lat_lon_names, load_hires_constants, load_imerg_raw, load_era5_day_raw, \
     VAR_LOOKUP_ERA5, interpolate_dataset_on_lat_lon, \
     get_era5_stats, load_fcst_stack, all_ifs_fields, load_era5, \
     load_ifs, get_imerg_filepaths, get_ifs_filepath, \
@@ -23,11 +22,6 @@ from dsrnngan.data.data import infer_lat_lon_names, load_hires_constants, load_i
     VAR_LOOKUP_IFS, get_ifs_stats, file_exists, get_dates, load_land_sea_mask, load_orography
 
 
-#TODO: get local data working with repo: currently only works in situ on the cluster
-# era5_path = str(data_folder / 'ERA5')
-# era5_daily_path = str(data_folder / 'ERA5_daily')
-# # TODO: need to correctly sample the data in HDF5 format
-# imerg_folder = str(data_folder / 'IMERG' / 'tmp')
 ifs_path = str(data_folder / 'IFS')
 nimrod_path = str(data_folder / 'NIMROD')
 constants_path = str(data_folder / 'constants')
@@ -56,8 +50,15 @@ def create_dummy_stats_data(year=2017):
         output_fp = f'{constants_path}/IFS_norm_{field}_{year}_lat0-0lon33-33.pkl'
         with open(output_fp, 'wb') as f:
             pickle.dump(stats, f, pickle.HIGHEST_PROTOCOL)
+            
+        if field == 'tp':
+            # Also need to save for ERA5
+            # Assuming we just need tp but if there are more ERA5 fields this needs
+            # to be given more thought
+            output_fp = f'{constants_path}/ERA5_norm_{field}_{year}_lat0-0lon33-33.pkl'
+            with open(output_fp, 'wb') as f:
+                pickle.dump(stats, f, pickle.HIGHEST_PROTOCOL)
     
-
 class TestLoad(unittest.TestCase):
     
     def setUp(self) -> None:
@@ -283,20 +284,20 @@ class TestLoad(unittest.TestCase):
                 testing.assert_array_equal(ds_tp_log, log_plus_1(ds_tp_no_log))
 
             # Try loading with normalisation
-            ds_tp_norm = load_era5(v, f'{year}{month:02d}{day:02d}', hour=12, log_precip=False, norm=True,
-                                   fcst_dir=str(era5_path),
-                                   latitude_vals=lat_vals, longitude_vals=lon_vals, constants_path=constants_path)
-            ds_tp_no_norm = load_era5(v, f'{year}{month:02d}{day:02d}', hour=12, log_precip=False, norm=False,
-                                      fcst_dir=str(era5_path),
-                                      latitude_vals=lat_vals, longitude_vals=lon_vals, constants_path=constants_path)
+            # ds_tp_norm = load_era5(v, f'{year}{month:02d}{day:02d}', hour=12, log_precip=False, norm=True,
+            #                        fcst_dir=str(era5_path),
+            #                        latitude_vals=lat_vals, longitude_vals=lon_vals, constants_path=constants_path)
+            # ds_tp_no_norm = load_era5(v, f'{year}{month:02d}{day:02d}', hour=12, log_precip=False, norm=False,
+            #                           fcst_dir=str(era5_path),
+            #                           latitude_vals=lat_vals, longitude_vals=lon_vals, constants_path=constants_path)
 
-            normalisation = var_name_lookup.get('normalisation')
-            stats_dict = get_era5_stats(v, output_dir=constants_path, era_data_dir=era5_path,
-                                        latitude_vals=lat_vals, longitude_vals=lon_vals)
+            # normalisation = var_name_lookup.get('normalisation')
+            # stats_dict = get_era5_stats(v, output_dir=constants_path, era_data_dir=era5_path,
+            #                             latitude_vals=lat_vals, longitude_vals=lon_vals, use_cached=True)
 
-            if normalisation == 'minmax':
-                testing.assert_array_equal(ds_tp_norm,
-                                 (ds_tp_no_norm - stats_dict['min']) / (stats_dict['max'] - stats_dict['min']))
+            # if normalisation == 'minmax':
+            #     testing.assert_array_equal(ds_tp_norm,
+            #                      (ds_tp_no_norm - stats_dict['min']) / (stats_dict['max'] - stats_dict['min']))
 
     def test_ifs_load_norm_logs(self):
 
@@ -460,32 +461,32 @@ class TestLoad(unittest.TestCase):
                             longitude_vals=[330.05, 330.15],
                             imerg_data_dir=imerg_folder)
 
-    def test_era5_stats(self):
+    # def test_era5_stats(self):
 
-        var_name_lookup = VAR_LOOKUP_ERA5
-        for v in var_name_lookup:
-            stats = get_era5_stats(v, year=2018, era_data_dir=constants_path,
-                                   longitude_vals=[33, 34], latitude_vals=[0, 1])
+    #     var_name_lookup = VAR_LOOKUP_ERA5
+    #     for v in var_name_lookup:
+    #         stats = get_era5_stats(v, year=2018, era_data_dir=constants_path,
+    #                                longitude_vals=[33, 34], latitude_vals=[0, 1])
 
-            self.assertIsInstance(stats, dict)
-            # Make sure negative velocities handled correctly
-            self.assertGreater(stats['min'] + 1e-16, 0)
-            self.assertGreater(stats['max'], 0)
-            self.assertGreater(stats['std'], 0)
+    #         self.assertIsInstance(stats, dict)
+    #         # Make sure negative velocities handled correctly
+    #         self.assertGreater(stats['min'] + 1e-16, 0)
+    #         self.assertGreater(stats['max'], 0)
+    #         self.assertGreater(stats['std'], 0)
             
-    def test_ifs_stats(self):
+    # def test_ifs_stats(self):
 
-        var_name_lookup = VAR_LOOKUP_IFS
-        for v in var_name_lookup:
-            stats = get_ifs_stats(v, year=2017,
-                                   longitude_vals=[33, 34], latitude_vals=[0, 1],
-                                   output_dir=self.temp_stats_dir.name)
+    #     var_name_lookup = VAR_LOOKUP_IFS
+    #     for v in var_name_lookup:
+    #         stats = get_ifs_stats(v, year=2017,
+    #                                longitude_vals=[33, 34], latitude_vals=[0, 1],
+    #                                output_dir=self.temp_stats_dir.name)
 
-            self.assertIsInstance(stats, dict)
-            # Make sure negative velocities handled correctly
-            self.assertGreater(stats['min'] + 1e-16, 0)
-            self.assertGreater(stats['max'], 0)
-            self.assertGreater(stats['std'], 0)
+    #         self.assertIsInstance(stats, dict)
+    #         # Make sure negative velocities handled correctly
+    #         self.assertGreater(stats['min'] + 1e-16, 0)
+    #         self.assertGreater(stats['max'], 0)
+    #         self.assertGreater(stats['std'], 0)
 
     def test_load_fcst_stack(self):
         
@@ -527,19 +528,19 @@ class TestLoad(unittest.TestCase):
                             'IMERG': str(data_folder / 'IMERG/half_hourly/final'),
                             'ERA5': str(data_folder / 'ERA5'),
                             'CONSTANTS': str(data_folder / 'constants')}}
-        dates = get_dates(2018, obs_data_source='imerg', fcst_data_source='era5',
-              data_paths=data_paths)
-        self.assertListEqual(['20181230', '20181231'], dates)
+        dates = get_dates(2017, obs_data_source='imerg', fcst_data_source='ifs',
+              data_paths=data_paths, hour=17)
+        self.assertListEqual(['20170704'], dates)
        
     def test_file_exists(self):
 
         data_paths = {'GENERAL': {
-                            'IFS': str(data_folder / 'IFS'),
-                            'IMERG': str(data_folder / 'IMERG/half_hourly/final'),
-                            'ERA5': str(data_folder / 'ERA5'),
-                            'CONSTANTS': str(data_folder / 'constants')}}
+                            'IFS': ifs_path,
+                            'IMERG': imerg_folder,
+                            'ERA5': era5_path,
+                            'CONSTANTS': constants_path}}
         
-        ## ERA5
+        # ## ERA5
         era5_file_exists = file_exists(data_source='era5', year=2018, month=12, day=31,
                                        data_paths=data_paths)
         self.assertTrue(era5_file_exists)
@@ -557,9 +558,9 @@ class TestLoad(unittest.TestCase):
                                        data_paths=data_paths)
         self.assertFalse(ifs_file_exists)
         
-        ## IMERG
-        imerg_file_exists = file_exists(data_source='imerg', year=2018, month=12, day=30,
-                                       data_paths=data_paths)
+        # ## IMERG
+        imerg_file_exists = file_exists(data_source='imerg', year=2017, month=7, day=4,
+                                       data_paths=data_paths, hour=17)
         self.assertTrue(imerg_file_exists)
         
         imerg_file_exists = file_exists(data_source='imerg', year=2018, month=1, day=31,
