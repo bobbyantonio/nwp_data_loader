@@ -191,7 +191,7 @@ class TestLoad(unittest.TestCase):
         longitude_vals = np.arange(33, 34, 0.1)
         batch_size = 4
         
-        c = load_hires_constants(oro_path=oro_path, lsm_path=lsm_path,
+        c = load_hires_constants(oro_filename=oro_path, lsm_filename=lsm_path,
                                  batch_size=batch_size, latitude_vals=latitude_vals, 
                                  longitude_vals=longitude_vals)
         self.assertEqual(c.shape, (batch_size, len(latitude_vals), len(longitude_vals), 2))

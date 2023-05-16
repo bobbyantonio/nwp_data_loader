@@ -164,12 +164,13 @@ def order_coordinates(ds: xr.Dataset):
     """
     
     lat_var_name, lon_var_name = infer_lat_lon_names(ds)
-    
-    if 'time' in list(ds.dims):
-        return ds.transpose('time', lat_var_name, lon_var_name)
-    else:
-        return ds.transpose(lat_var_name, lon_var_name)
 
+    if 'time' in list(ds.dims):
+        return ds[['time', lat_var_name, lon_var_name] + list(ds.variables)]
+    else:
+        return ds[[lat_var_name, lon_var_name] + list(ds.variables)]
+        
+    
 def make_dataset_consistent(ds: xr.Dataset):
     """
     Ensure longitude and latitude are ordered in ascending order
@@ -182,6 +183,8 @@ def make_dataset_consistent(ds: xr.Dataset):
     """
     
     latitude_var, longitude_var = infer_lat_lon_names(ds)
+    
+    ds = order_coordinates(ds)
     ds = ds.sortby(latitude_var, ascending=True)
     ds = ds.sortby(longitude_var, ascending=True)
     
