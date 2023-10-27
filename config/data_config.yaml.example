@@ -1,0 +1,94 @@
+data_paths: "SYSTEM_NAME"  # Choose which paths version to use in PATHS
+fcst_data_source: "ifs"
+obs_data_source: "imerg"
+normalisation_year: 2017
+num_samples: 320000
+normalise_inputs: True
+output_normalisation: "log"
+num_classes: 4 # Number of bins to split data into
+min_latitude: -11.95
+max_latitude: 15.05
+latitude_step_size: 0.1
+min_longitude: 25.05
+max_longitude: 51.45
+longitude_step_size: 0.1
+input_fields: 
+    - 2t
+    - cape
+    - cp
+    - r200
+    - r700
+    - r950
+    - sp
+    - t200
+    - t700
+    - tclw
+    - tcwv
+    - tisr
+    - tp
+    - u200
+    - u700
+    - v200
+    - v700
+    - w200
+    - w500
+    - w700
+constant_fields:
+    - orography
+    - lsm
+input_normalisation_strategy:
+    tpq:
+      negative_vals: False
+      normalisation: "log"
+    tp:
+      negative_vals: False
+      normalisation: "log"
+    cp: 
+      negative_vals: False
+      normalisation: "log"
+    pr:
+      negative_vals: False
+      normalisation: "log"
+    prl:
+      negative_vals: False
+      normalisation: "log"
+    prc:
+      negative_vals: False
+      normalisation: "log"
+    sp:
+      normalisation: "minmax"
+    u: 
+      normalisation: "max"
+    v:
+      normalisation: "max"
+    w: 
+      normalisation: "max"
+    r:
+      normalisation: "max"
+    2t:
+      normalisation: "minmax"
+      negative_vals: False
+    cape: 
+      normalisation: "log"
+    cin:
+      normalisation: "max" 
+    t:
+      normalisation: "minmax"
+      negative_vals: False
+    tclw:
+      normalisation: "log" 
+    tcwv:
+      normalisation: "max"
+    tisr:
+      normalisation: "max"
+paths:
+  SYSTEM_NAME:
+      GENERAL:
+          IMERG: '/path/to/other/IMERG/half_hourly/final/'
+          ERA5: '/path/to/other/data/ERA-5/day'
+          IFS: '/path/to/other/IFS'
+          OROGRAPHY: '/path/to/other/constants/h_HRES_EAfrica.nc'
+          LSM: '/path/to/other/constants/lsm_HRES_EAfrica.nc'
+          LAKES: '/path/to/other/constants/lake_mask.nc'
+          SEA: '/path/to/other/constants/sea_mask.nc'
+          CONSTANTS: '/path/to/other/constants'

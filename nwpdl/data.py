@@ -8,7 +8,7 @@ import netCDF4
 from calendar import monthrange
 from tqdm import tqdm
 from glob import glob
-from typing import Iterable, Union
+from typing import Iterable
 
 from datetime import datetime, timedelta, date
 import numpy as np
@@ -20,9 +20,10 @@ from argparse import ArgumentParser
 logger = logging.getLogger(__file__)
 logger.setLevel(logging.INFO)
 
-from .config_utils import get_data_paths, read_config
+from . import config_utils
 
-DATA_PATHS = get_data_paths()
+data_config = config_utils.read_data_config()
+DATA_PATHS = config_utils.get_data_paths()
 
 # Raw paths for data that has not been regridded or cut down to correct lat/lon range
 
@@ -30,8 +31,8 @@ IMERG_PATH = DATA_PATHS["GENERAL"].get("IMERG", '')
 NIMROD_PATH = DATA_PATHS["GENERAL"].get("NIMROD", '')
 ERA5_PATH = DATA_PATHS["GENERAL"].get("ERA5", '')
 IFS_PATH = DATA_PATHS["GENERAL"].get("IFS", '')
-OROGRAPHY_FILENAME = DATA_PATHS["GENERAL"].get("OROGRAPHY_FILENAME")
-LSM_FILENAME = DATA_PATHS["GENERAL"].get("LSM_FILENAME")
+OROGRAPHY_PATH = DATA_PATHS["GENERAL"].get("OROGRAPHY")
+LSM_PATH = DATA_PATHS["GENERAL"].get("LSM")
 CONSTANTS_PATH = DATA_PATHS["GENERAL"].get("CONSTANTS")
 
 FIELD_TO_HEADER_LOOKUP_IFS = {'tp': 'sfc',
@@ -50,8 +51,9 @@ FIELD_TO_HEADER_LOOKUP_IFS = {'tp': 'sfc',
 # 'cin', Left out for the moment as contains a lot of nulls
 all_ifs_fields = ['2t', 'cape',  'cp', 'r200', 'r700', 'r950', 
                   'sp', 't200', 't700', 'tclw', 'tcwv', 'tisr', 'tp', 
-                  'u200', 'u700', 'v200', 'v700', 'w200', 'w500', 'w700']
-
+                  'u200', 'u700', 'v200', 'v700', 'w200', 'w500', 'w700', 'cin']
+input_fields = data_config.input_fields
+constant_fields = data_config.constant_fields
 all_fcst_hours = np.array(range(24))
 
 # TODO: change this to behave like the IFS data load (to allow other vals of v, u etc)
@@ -67,23 +69,7 @@ VAR_LOOKUP_ERA5 = {'tp': {'folder': 'total_precipitation', 'suffix': 'day',
                         'v': {'folder': 'v', 'subfolder': 'v700', 'suffix': 'day_1deg',
                               'normalisation': 'minmax'}}
 
-IFS_NORMALISATION_STRATEGY = {'tp': {'negative_vals': False, 'normalisation': 'log'}, 
-                              'cp': {'negative_vals': False, 'normalisation': 'log'},
-                  'pr': {'negative_vals': False, 'normalisation': 'log'}, 
-                  'prl': {'negative_vals': False, 'normalisation': 'log'},
-                  'prc': {'negative_vals': False, 'normalisation': 'log'},
-                  'sp': {'normalisation': 'minmax'},
-                  'u': {'normalisation': 'max'},
-                  'v': {'normalisation': 'max'},
-                  'w': {'normalisation': 'max'},
-                  'r': {'normalisation': 'max'}, 
-                  '2t': {'normalisation': 'minmax', 'negative_vals': False}, 
-                  'cape': {'normalisation': 'log'}, 
-                  'cin': {'normalisation': 'max'}, 
-                  't': {'normalisation': 'minmax', 'negative_vals': False},
-                  'tclw': {'normalisation': 'log'}, 
-                  'tcwv': {'normalisation': 'max'}, 
-                  'tisr': {'normalisation': 'max'}}
+IFS_NORMALISATION_STRATEGY = data_config.input_normalisation_strategy
 
 VAR_LOOKUP_IFS = {field: IFS_NORMALISATION_STRATEGY[re.sub(r'([0-9]*[a-z]+)[0-9]*', r'\1', field)] 
                   for field in all_ifs_fields}
@@ -92,33 +78,41 @@ all_era5_fields = list(VAR_LOOKUP_ERA5.keys())
 
 input_field_lookup = {'ifs': all_ifs_fields, 'era5': all_era5_fields}
 
-config = read_config()
+NORMALISATION_YEAR = data_config.normalisation_year
 
-NORMALISATION_YEAR = config['TRAIN']['normalisation_year']
-
-min_latitude = config['DATA']['min_latitude']
-max_latitude = config['DATA']['max_latitude']
-latitude_step_size = config['DATA']['latitude_step_size']
-min_longitude = config['DATA']['min_longitude']
-max_longitude = config['DATA']['max_longitude']
-longitude_step_size = config['DATA']['longitude_step_size']
-DEFAULT_LATITUDE_RANGE=np.arange(min_latitude, max_latitude + latitude_step_size, latitude_step_size)
-DEFAULT_LONGITUDE_RANGE=np.arange(min_longitude, max_longitude + longitude_step_size, longitude_step_size)
+DEFAULT_LATITUDE_RANGE=np.arange(data_config.min_latitude, data_config.max_latitude + data_config.latitude_step_size, data_config.latitude_step_size)
+DEFAULT_LONGITUDE_RANGE=np.arange(data_config.min_longitude, data_config.max_longitude + data_config.longitude_step_size, data_config.longitude_step_size)
 
 char_integer_re = re.compile(r'[a-zA-Z]*([0-9]+)')
 
-def denormalise(x: np.float64):
+def denormalise(x: np.float64, normalisation_type: str):
     """
-    Undo log normalisation
+    Undo normalisation
 
     Args:
-        x (np.float64): log normalised float
-
+        x (np.float64): normalised float
+        normalisation_type (str): type of normalisation
     Returns:
         np.float64: denormalised float
     """
-    return 10 ** x - 1
+        
+    if normalisation_type == 'log':
+        return 10 ** x - 1
+    elif normalisation_type == 'sqrt':
+        return np.power(x,2)
+    else:
+        raise NotImplementedError(f'normalisation type {normalisation_type} not recognised')
+    
 
+def normalise_precipitation(data_array: xr.DataArray,
+                            normalisation_type: str):
+    
+    if normalisation_type == 'log':
+        return np.log10(1 + data_array)
+    elif normalisation_type == 'sqrt':
+        return np.sqrt(data_array)
+    else:
+        raise NotImplementedError(f'normalisation type {normalisation_type} not recognised')
 
 def log_plus_1(data_array: xr.DataArray):
     """
@@ -164,13 +158,12 @@ def order_coordinates(ds: xr.Dataset):
     """
     
     lat_var_name, lon_var_name = infer_lat_lon_names(ds)
-
-    if 'time' in list(ds.dims):
-        return ds[['time', lat_var_name, lon_var_name] + list(ds.variables)]
-    else:
-        return ds[[lat_var_name, lon_var_name] + list(ds.variables)]
-        
     
+    if 'time' in list(ds.dims):
+        return ds.transpose('time', lat_var_name, lon_var_name)
+    else:
+        return ds.transpose(lat_var_name, lon_var_name)
+
 def make_dataset_consistent(ds: xr.Dataset):
     """
     Ensure longitude and latitude are ordered in ascending order
@@ -183,31 +176,25 @@ def make_dataset_consistent(ds: xr.Dataset):
     """
     
     latitude_var, longitude_var = infer_lat_lon_names(ds)
-    
-    ds = order_coordinates(ds)
     ds = ds.sortby(latitude_var, ascending=True)
     ds = ds.sortby(longitude_var, ascending=True)
     
     return ds
 
-def get_obs_dates(start_date: datetime,
-                  end_date: datetime,  hour: int, obs_data_source: str, 
+def get_obs_dates(date_range: list,  hour: int, obs_data_source: str, 
                   data_paths=DATA_PATHS,
                   ):
     """
     Get dates for which there is observational data available
     Args:
-        start_date (datetime): Start date (hourly level)
-        end_date (datetime): End date (hourly level)
+        date_range (list): list of candidate dates
         obs_data_source (str): Name of data source
         data_paths (dict, optional): Dict containing data paths. Defaults to DATA_PATHS.
 
     Returns:
         list: list of dates
     """
-    date_range = pd.date_range(start=start_date, end=end_date)
-    date_range = [item.date() for item in date_range]
-    
+
     obs_dates = set([item for item in date_range if file_exists(data_source=obs_data_source, year=item.year,
                                                     month=item.month, day=item.day,
                                                     data_paths=data_paths, hour=hour)])
@@ -216,8 +203,7 @@ def get_obs_dates(start_date: datetime,
 
 def get_dates(years, obs_data_source: str, 
               fcst_data_source: str,
-              data_paths=DATA_PATHS,
-              hour: Union[str, int]='random' ):
+              data_paths=DATA_PATHS):
     """
     Get dates for which there is observational and forecast data
 
@@ -226,7 +212,7 @@ def get_dates(years, obs_data_source: str,
         obs_data_source (str): name of observational data source
         fcst_data_source (str): name of forecast data source
         data_paths (dict, optional): Dict containing paths to data. Defaults to DATA_PATHS.
-        hour (Union[str, int], optional): hour to look for, defaults to 'random'
+
     Returns:
         list: list of valid date strings
     """
@@ -240,10 +226,10 @@ def get_dates(years, obs_data_source: str,
     
     obs_dates = set([item for item in date_range if file_exists(data_source=obs_data_source, year=item.year,
                                                     month=item.month, day=item.day,
-                                                    data_paths=data_paths, hour=hour)])
+                                                    data_paths=data_paths)])
     fcst_dates = set([item for item in date_range if file_exists(data_source=fcst_data_source, year=item.year,
                                                     month=item.month, day=item.day,
-                                                    data_paths=data_paths, hour=hour)])
+                                                    data_paths=data_paths)])
     dates = sorted(obs_dates.intersection(fcst_dates))
         
     return [item.strftime('%Y%m%d') for item in dates]
@@ -304,9 +290,7 @@ def file_exists(data_source: str, year: int,
                 
 def filter_by_lat_lon(ds: xr.Dataset, 
                       lon_range: list, 
-                      lat_range: list, 
-                      lon_var_name:str='lon', 
-                      lat_var_name:str ='lat'):
+                      lat_range: list):
     """
     Filter dataset by latitude / longitude range
 
@@ -322,11 +306,17 @@ def filter_by_lat_lon(ds: xr.Dataset,
     """
     lat_var_name, lon_var_name = infer_lat_lon_names(ds)
     
-    all_lat_vals = [val for val in ds[lat_var_name].values if min(lat_range) <= val <= max(lat_range)]
-    all_lon_vals = [val for val in ds[lon_var_name].values if min(lon_range) <= val <= max(lon_range)]
+    all_lat_vals = ds[lat_var_name].values
+    all_lon_vals = ds[lon_var_name].values
     
-    ds = ds.sel({lat_var_name: all_lat_vals})
-    ds = ds.sel({lon_var_name: all_lon_vals})
+    overlapping_lat_vals = all_lat_vals[all_lat_vals >= min(lat_range)]
+    overlapping_lat_vals = overlapping_lat_vals[overlapping_lat_vals <= max(lat_range)]
+    
+    overlapping_lon_vals = all_lon_vals[all_lon_vals >= min(lon_range)]
+    overlapping_lon_vals = overlapping_lon_vals[overlapping_lon_vals <= max(lon_range)]
+        
+    ds = ds.sel({lat_var_name: overlapping_lat_vals})
+    ds = ds.sel({lon_var_name: overlapping_lon_vals})
    
     return ds
 
@@ -365,8 +355,7 @@ def interpolate_dataset_on_lat_lon(ds: xr.Dataset,
     
     # Filter to correct lat/lon range (faster this way)
     # Add a buffer around it for interpolation
-    ds = filter_by_lat_lon(ds, [min_lon - 2, max_lon+2], [min_lat - 2, max_lat +2], 
-                      lon_var_name=lon_var_name, lat_var_name=lat_var_name)
+    ds = filter_by_lat_lon(ds, [min_lon - 2, max_lon+2], [min_lat - 2, max_lat +2])
 
     # check enough data to interpolate
     min_actual_lat = min(ds.coords[lat_var_name].values)
@@ -419,7 +408,7 @@ def load_hdf5_file(fp: str, group_name:str ='Grid'):
 
 def preprocess(variable: str, 
                ds: xr.Dataset, 
-               var_name_lookup: dict, 
+               normalisation_strategy: dict, 
                stats_dict: dict=None):
     """
     Preprocess data
@@ -427,7 +416,7 @@ def preprocess(variable: str,
     Args:
         variable (str): name of variable.
         ds (xr.Dataset): dataset containing data for named variable
-        var_name_lookup (dict): dict containing normalisation strategy for each variable
+        normalisation_strategy (dict): dict containing normalisation strategy for each variable
         stats_dict (dict, optional): dict of values required for normalisation. Defaults to None.
 
     Returns:
@@ -437,7 +426,7 @@ def preprocess(variable: str,
     
     var_name = list(ds.data_vars)[0]
 
-    normalisation_type = var_name_lookup[variable].get('normalisation')
+    normalisation_type = normalisation_strategy[variable].get('normalisation')
 
     if normalisation_type:
 
@@ -452,7 +441,10 @@ def preprocess(variable: str,
             
         elif normalisation_type == 'max':
             ds[var_name] = ds[var_name] / stats_dict['max']
-        
+            
+        elif normalisation_type == 'sqrt':
+            ds[var_name] = normalise_precipitation(ds[var_name], 'sqrt')
+
         else:
             raise ValueError(f'Unrecognised normalisation type for variable {var_name}')
 
@@ -475,7 +467,7 @@ def load_observational_data(data_source: str, *args, **kwargs):
         raise NotImplementedError(f'Data source {data_source} not implemented yet')
 
 
-def load_orography(oro_path: str=OROGRAPHY_FILENAME, 
+def load_orography(filepath: str=OROGRAPHY_PATH, 
                    latitude_vals: list=None, 
                    longitude_vals: list=None,
                    interpolate: bool=True):
@@ -483,7 +475,7 @@ def load_orography(oro_path: str=OROGRAPHY_FILENAME,
     Load orography values
 
     Args:
-        oro_path (str, optional): path to orography data. Defaults to OROGRAPHY_PATH.
+        filepath (str, optional): path to orography data. Defaults to OROGRAPHY_PATH.
         latitude_vals (list, optional): list of latitude values to filter/interpolate to. Defaults to None.
         longitude_vals (list, optional): list of longitude values to filter/interpolate to. Defaults to None.
         interpolate (bool, optional): Whether or not to interpolate. Defaults to True.
@@ -491,7 +483,7 @@ def load_orography(oro_path: str=OROGRAPHY_FILENAME,
     Returns:
         np.ndarray: orography data array
     """
-    ds = xr.load_dataset(oro_path)
+    ds = xr.load_dataset(filepath)
     
     # Note that this assumes the orography is somewhat filtered already 
     # If it is worldwide orography then normalised values will probably be too small!
@@ -516,7 +508,7 @@ def load_orography(oro_path: str=OROGRAPHY_FILENAME,
 
     return h_vals
 
-def load_land_sea_mask(lsm_path=LSM_FILENAME, 
+def load_land_sea_mask(filepath=LSM_PATH, 
                        latitude_vals=None, 
                        longitude_vals=None,
                        interpolate=True):
@@ -524,7 +516,7 @@ def load_land_sea_mask(lsm_path=LSM_FILENAME,
     Load land-sea mask values
 
     Args:
-        lsm_path (str, optional): path to land-sea masj data. Defaults to LSM_PATH.
+        filepath (str, optional): path to land-sea masj data. Defaults to LSM_PATH.
         latitude_vals (list, optional): list of latitude values to filter/interpolate to. Defaults to None.
         longitude_vals (list, optional): list of longitude values to filter/interpolate to. Defaults to None.
         interpolate (bool, optional): Whether or not to interpolate. Defaults to True.
@@ -532,7 +524,7 @@ def load_land_sea_mask(lsm_path=LSM_FILENAME,
     Returns:
         np.ndarray: land-sea mask data array
     """
-    ds = xr.load_dataset(lsm_path)
+    ds = xr.load_dataset(filepath)
     
     if latitude_vals is not None and longitude_vals is not None:
         if interpolate:
@@ -550,10 +542,11 @@ def load_land_sea_mask(lsm_path=LSM_FILENAME,
     
     return lsm
 
-def load_hires_constants(batch_size: int=1, 
-                         constants_folder: str=CONSTANTS_PATH,
-                         lsm_filename: str=LSM_FILENAME, 
-                         oro_filename: str=OROGRAPHY_FILENAME,
+
+def load_hires_constants(
+                         fields: Iterable,
+                         data_paths: dict,
+                         batch_size: int=1,
                          latitude_vals: list=None, 
                          longitude_vals: list=None):
     """
@@ -571,23 +564,27 @@ def load_hires_constants(batch_size: int=1,
     Returns:
         np.ndarray: array of data
     """
-    if lsm_filename is None:
-        lsm_filename = LSM_FILENAME
     
-    if oro_filename is None:
-        oro_filename = OROGRAPHY_FILENAME
+    function_lookup = {'lsm': load_land_sea_mask,
+                       'orography': load_orography,
+                       'lakes': load_land_sea_mask,
+                       'sea': load_land_sea_mask}
     
-    # LSM 
-    lsm = load_land_sea_mask(lsm_path=os.path.join(constants_folder, lsm_filename), latitude_vals=latitude_vals,
-                             longitude_vals=longitude_vals)
-    lsm= np.expand_dims(lsm, axis=0) # Need to expand so that dims are consistent with other data
+    unrecognised_fields = [f for f in fields if f not in function_lookup]
 
-    # Orography
-    z = load_orography(oro_path=os.path.join(constants_folder, oro_filename), latitude_vals=latitude_vals, 
-                       longitude_vals=longitude_vals)
-    z = np.expand_dims(z, axis=0)
+    if len(unrecognised_fields) > 0:
+        raise ValueError(f'Unrecognised constant field names: {unrecognised_fields}')
     
-    return np.repeat(np.stack([z, lsm], axis=-1), batch_size, axis=0)
+    constant_data = []
+    for field in fields:
+        tmp_array = function_lookup[field.lower()](filepath=data_paths[field.upper()],
+                                                            latitude_vals=latitude_vals,
+                                                            longitude_vals=longitude_vals)
+        tmp_array = np.expand_dims(tmp_array, axis=0)
+        
+        constant_data.append(tmp_array)
+    
+    return np.repeat(np.stack(constant_data, axis=-1), batch_size, axis=0)
 
 
 ### These functions work with IFS / Nimrod.
@@ -599,10 +596,14 @@ def load_fcst_radar_batch(batch_dates: Iterable,
                           obs_data_source: str, 
                           fcst_dir: str,
                           obs_data_dir: str,
+                          normalisation_strategy: dict,
                           latitude_range: Iterable[float]=None,
                           longitude_range: Iterable[float]=None,
                           constants_dir: str=CONSTANTS_PATH,
-                          constants: bool=False, hour: int=0, norm: bool=False):
+                          constant_fields: list=None, 
+                          hour: int=0, 
+                          normalise_inputs: bool=False,
+                          output_normalisation: bool=False):
     batch_x = []
     batch_y = []
 
@@ -621,17 +622,17 @@ def load_fcst_radar_batch(batch_dates: Iterable,
         h = hours[i]
         batch_x.append(load_fcst_stack(fcst_data_source, fcst_fields, date, h,
                                        latitude_vals=latitude_range, longitude_vals=longitude_range, fcst_dir=fcst_dir,
-                                       norm=norm, constants_dir=constants_dir))
+                                       norm=normalise_inputs, constants_dir=constants_dir,
+                                       normalisation_strategy=normalisation_strategy))
         
         if obs_data_source is not None:
-            batch_y.append(load_observational_data(obs_data_source, date, h, log_precip=norm,
+            batch_y.append(load_observational_data(obs_data_source, date, h, normalisation_type=output_normalisation,
                                                 latitude_vals=latitude_range, longitude_vals=longitude_range,
                                                 data_dir=obs_data_dir))
-    if (not constants):
+    if constant_fields is None:
         return np.array(batch_x), np.array(batch_y)
     else:
-        return [np.array(batch_x), load_hires_constants(len(batch_dates), 
-                                                        constants_folder=constants_dir)], np.array(batch_y)
+        return [np.array(batch_x), load_hires_constants(batch_size=len(batch_dates), fields=constant_fields)], np.array(batch_y)
 
 def get_ifs_filepath(field: str, loaddate: datetime, 
                      loadtime: int, fcst_dir: str=IFS_PATH):
@@ -700,7 +701,8 @@ def load_ifs_raw(field: str,
                  month: int,
                  day: int, hour: int, ifs_data_dir: str=IFS_PATH,
                  latitude_vals: list=None, longitude_vals: list=None, 
-                 interpolate: bool=True):
+                 interpolate: bool=True,
+                 convert_to_float_64: bool=False):
     """
     Load raw IFS data (i.e without any normalisation or conversion to mm/hr)
 
@@ -714,7 +716,7 @@ def load_ifs_raw(field: str,
         latitude_vals (list, optional): latitude values to filter/interpolate to. Defaults to None.
         longitude_vals (list, optional): longitude values to filter/interpolate to. Defaults to None.
         interpolate (bool, optional): whether or not to interpolate. Defaults to True.
-    
+        convert_to_float_64 (bool, optional): Whether or not to convert to float 64,
     Returns:
         xr.Dataset: dataset
     """
@@ -749,8 +751,10 @@ def load_ifs_raw(field: str,
     assert len(var_names) == 1, ValueError('More than one variable found; cannot automatically infer variable name')
     var_name = list(ds.data_vars)[0]
     
-    # Multiplication with float32 leads to some discrepancies
-    ds[var_name] = ds[var_name].astype(np.float64)
+    if convert_to_float_64:
+        # Multiplication with float32 leads to some discrepancies
+        # But in some cases this is outweighed by speed 
+        ds[var_name] = ds[var_name].astype(np.float64)
        
     # Account for cumulative fields
     if var_name in ['tp', 'cp', 'cdir', 'tisr']:
@@ -761,7 +765,7 @@ def load_ifs_raw(field: str,
 
     if latitude_vals is not None and longitude_vals is not None:
         if interpolate:
-            if var_name in ['tp', 'tclw', 'cape', 'tisr', 'tcwv', 'cp']:
+            if var_name in ['tp', 'tclw', 'cape', 'tisr', 'tcwv', 'cp', 'cin']:
                 interpolation_method = 'conservative'
             else:
                 interpolation_method = 'bilinear'
@@ -778,9 +782,10 @@ def load_ifs_raw(field: str,
     return ds
 
 def load_ifs(field: str, 
-             date, hour: int, norm: bool=False, 
-             fcst_dir: str=IFS_PATH, 
-             var_name_lookup: dict=VAR_LOOKUP_IFS,
+             date, hour: int,
+             normalisation_strategy: dict,
+             norm: bool=False, 
+             fcst_dir: str=IFS_PATH,
              latitude_vals: list=None, 
              longitude_vals: list=None, 
              constants_path: str=CONSTANTS_PATH):
@@ -793,7 +798,7 @@ def load_ifs(field: str,
         hour (int): hour to forecast
         norm (bool, optional): whether or not to normalise the data. Defaults to False.
         fcst_dir (str, optional): forecast data directory. Defaults to IFS_PATH.
-        var_name_lookup (str, optional): dict with normalisation details for variables. Defaults to VAR_LOOKUP_IFS.
+        normalisation_strategy (str, optional): dict with normalisation details for variables. Defaults to VAR_LOOKUP_IFS.
         latitude_vals (list, optional): latitude values to filter/interpolate to. Defaults to None.
         longitude_vals (list, optional): longitude_vals to filter/interpolate to. Defaults to None.
         constants_path (str, optional): path to constant data. Defaults to CONSTANTS_PATH.
@@ -810,7 +815,7 @@ def load_ifs(field: str,
     
     var_name = list(ds.data_vars)[0]
     
-    if not var_name_lookup[field].get('negative_vals', True):
+    if not normalisation_strategy[field].get('negative_vals', True):
         # Make sure no negative values
         ds[var_name] = ds[var_name].clip(min=0)
         
@@ -818,12 +823,16 @@ def load_ifs(field: str,
         # precipitation is measured in metres, so multiply up
         ds[var_name] = 1000 * ds[var_name]
         
+    if field == 'cin':
+        # Replace null values with 0
+        ds[var_name] = ds[var_name].fillna(0)
+        
     if norm:
         stats_dict = get_ifs_stats(field, latitude_vals=latitude_vals, longitude_vals=longitude_vals,
                             use_cached=True, ifs_data_dir=fcst_dir,
                             output_dir=constants_path)
         # Normalisation here      
-        ds = preprocess(field, ds, stats_dict=stats_dict, var_name_lookup=var_name_lookup)
+        ds = preprocess(field, ds, stats_dict=stats_dict, normalisation_strategy=normalisation_strategy)
     
     y = np.array(ds[var_name][:, :])
     
@@ -833,6 +842,7 @@ def load_ifs(field: str,
 def load_fcst_stack(data_source: str, fields: list, 
                     date: str, hour: int, 
                     fcst_dir: str, 
+                    normalisation_strategy: dict,
                     constants_dir:str=CONSTANTS_PATH,
                     norm:bool=False,
                     latitude_vals:list=None, longitude_vals:list=None):
@@ -845,6 +855,7 @@ def load_fcst_stack(data_source: str, fields: list,
         date (str): YYYYMMDD date string to forecast for
         hour (int): hour to forecast for
         fcst_dir (str): folder with forecast data in
+        normalisation_strategy (dict): normalisation strategy
         constants_dir (str, optional): folder with constants data in. Defaults to CONSTANTS_PATH.
         norm (bool, optional): whether or not to normalise the data. Defaults to False.
         latitude_vals (list, optional): list of latitude values. Defaults to None.
@@ -865,7 +876,8 @@ def load_fcst_stack(data_source: str, fields: list,
     for f in fields:
         field_arrays.append(load_function(f, date, hour, fcst_dir=fcst_dir,
                                           latitude_vals=latitude_vals, longitude_vals=longitude_vals,
-                                          constants_path=constants_dir, norm=norm))
+                                          constants_path=constants_dir, norm=norm,
+                                          normalisation_strategy=normalisation_strategy))
     return np.stack(field_arrays, -1)
 
 
@@ -1003,7 +1015,7 @@ def get_era5_stats(variable: str, longitude_vals: list, latitude_vals: list,
     max_lon = int(max(longitude_vals))
         
     # Filepath is spcific to make sure we don't use the wrong normalisation stats
-    fp = f'{output_dir}/ERA5_norm_{variable}_{year}_lat{min_lat}-{max_lat}lon{min_lon}-{max_lon}.pkl'
+    fp = f'{output_dir}/ERA_norm_{variable}_{year}_lat{min_lat}-{max_lat}lon{min_lon}-{max_lon}.pkl'
 
     if use_cached and os.path.isfile(fp):
         logger.debug('Loading stats from cache')
@@ -1062,9 +1074,11 @@ def load_era5(ifield, date, hour=0, log_precip=False, norm=False, fcst_dir=ERA5_
 
     """
     dt = datetime.strptime(date, '%Y%m%d')
+
     ds = load_era5_day_raw(variable=ifield, year=dt.year, month=dt.month, day=dt.day,
-                           latitude_vals=latitude_vals, longitude_vals=longitude_vals,
-                           era_data_dir=fcst_dir)
+                        latitude_vals=latitude_vals, longitude_vals=longitude_vals,
+                        era_data_dir=fcst_dir)
+
 
     stats_dict = get_era5_stats(ifield, latitude_vals=latitude_vals, longitude_vals=longitude_vals,
                                 use_cached=True, era_data_dir=fcst_dir,
@@ -1079,7 +1093,7 @@ def load_era5(ifield, date, hour=0, log_precip=False, norm=False, fcst_dir=ERA5_
     ds.close()
 
     if ifield == 'tp' and log_precip == True:
-        y = log_plus_1(y)
+        y = normalise_precipitation(y, normalisation_type='log')
 
     ds.close()
 
@@ -1149,7 +1163,7 @@ def load_imerg_raw(year: int, month: int, day: int,
 
 def load_imerg(date: datetime, hour: int=18, data_dir: str=IMERG_PATH,
                latitude_vals: list=None, longitude_vals: list=None,
-               log_precip: bool=False):
+               normalisation_type: str=None):
     """
 
      Function to fetch iMERG data, designed to match the structure of the load_radar function, so they can be
@@ -1174,8 +1188,8 @@ def load_imerg(date: datetime, hour: int=18, data_dir: str=IMERG_PATH,
     precip = ds['precipitationCal'].values
     ds.close()
     
-    if log_precip:
-        precip = log_plus_1(precip)
+    if normalisation_type is not None:
+        precip = normalise_precipitation(precip, normalisation_type=normalisation_type)
 
     return precip
 
@@ -1198,6 +1212,7 @@ if __name__ == '__main__':
     parser.add_argument('--max-latitude', type=int, required=True)
     parser.add_argument('--min-longitude', type=int, required=True)
     parser.add_argument('--max-longitude', type=int, required=True)
+    parser.add_argument('--input-obs-folder', type=str, default=None)
 
     args = parser.parse_args()
 
@@ -1250,7 +1265,7 @@ if __name__ == '__main__':
 
         year, month, day, hour = date_item
 
-        fps = glob(os.path.join('/bp1/geog-tropical/data/Obs/IMERG/half_hourly/final', 
+        fps = glob(os.path.join(args.input_obs_folder, 
                                 f'3B-HHR.MS.MRG.3IMERG.{year}{month:02d}{day:02d}-S{hour:02d}*'))
         
         if len(fps) == 0:
